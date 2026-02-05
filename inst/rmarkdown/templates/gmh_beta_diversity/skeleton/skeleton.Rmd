@@ -43,7 +43,7 @@ library(phyloseq)
 library(cowplot)
 library(ggExtra)
 library(vegan)
-library(ecole)
+library(pairwiseAdonis)
 
 # save parameters
 saveRDS(params, "R_objects/params_betadiv.RDS")
@@ -461,13 +461,13 @@ adonis2(dist.used ~ van*pfos, data = mdat, strata = mdat$day, permutations = 999
 
 ### RUN PAIRWISE ADONIS
 
-You can run a PERMANOVA for each pairwise combination of groups in a variable we use the `permanova_pairwise` from the package \code{ecole}.
+You can run a PERMANOVA for each pairwise combination of groups in a variable we use the `pairwise.adonis2` from the package \code{pairwiseAdonis}.
 The function can only test one variable at the time, but does identify differences between each pair of groups.
 
 ```{r, eval = TRUE}
 
 # Perform pairwise test
-permanova_pairwise(dist.used, grp = mdat[,VAR])
+pairwise.adonis2(dist.used ~ get(VAR), data = mdat)
 
 ```
 

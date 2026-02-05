@@ -14,6 +14,7 @@ initiate_GMH_project <- function(folders = TRUE, files = TRUE, overwrite = FALSE
     if (!file.exists("plots")) dir.create(file.path(getwd(), "plots"))
     if (!file.exists("tables")) dir.create(file.path(getwd(), "tables"))
     if (!file.exists("output")) dir.create(file.path(getwd(), "output"))
+    if (!file.exists("input")) dir.create(file.path(getwd(), "input"))
   }
 
   # Create the initial files if not found

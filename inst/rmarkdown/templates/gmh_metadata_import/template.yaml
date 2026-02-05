@@ -1,0 +1,4 @@
+name: GMH_metadata_import
+description: >
+   A template for adding and cleaning metadata, decontamination, and, calculating rarefaction and alpha diversity
+create_dir: FALSE

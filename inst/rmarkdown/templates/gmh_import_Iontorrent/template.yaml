@@ -1,0 +1,4 @@
+name: GMH_import_Iontorrent
+description: >
+   A template for the import and QC of IonTorrent sequencing data
+create_dir: FALSE

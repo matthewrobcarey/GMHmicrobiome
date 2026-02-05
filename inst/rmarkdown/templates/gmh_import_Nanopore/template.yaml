@@ -1,0 +1,4 @@
+name: GMH_import_Nanopore
+description: >
+   A template for the import and QC of Nanopore sequencing data
+create_dir: FALSE
