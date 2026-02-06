@@ -4,18 +4,40 @@
 \alias{initiate_GMH_project}
 \title{Initiate GMH project}
 \usage{
-initiate_GMH_project(folders = TRUE, files = TRUE, overwrite = FALSE)
+initiate_GMH_project(
+  folders = TRUE,
+  files = TRUE,
+  overwrite = FALSE,
+  platform = "nanopore"
+)
 }
 \arguments{
-\item{folders}{Logical indicator if folder should be created. Default = TRUE}
+\item{folders}{Logical. indicator if folder should be created. Default = TRUE}
 
-\item{files}{Logical indicator if Rmarkdown templates should be created. Default = TRUE}
+\item{files}{Logical. indicator if Rmarkdown templates should be created. Default = TRUE}
 
-\item{overwrite}{Logical indicator if files should be overwritten if present. Default = FALSE}
+\item{overwrite}{Logical. indicator if files should be overwritten if present. Default = FALSE}
+
+\item{platform}{Character. Sequencing platform used: "nanopore" or "iontorrent". Default = "nanopore"}
 }
 \value{
 Create system files and folders
 }
 \description{
 Creates the folders and/or import the base Rmarkdown templates needed to run basic microbiome analysis using the \code{GMHmicrobiome} pipeline.
+}
+\examples{
+\dontrun{
+# Create project with nanopore templates (default)
+initiate_GMH_project()
+
+# Create project with iontorrent templates
+ initiate_GMH_project(platform = "iontorrent")
+
+# Only create the folders, no template files
+initiate_GMH_project(files = FALSE)
+
+Overwrite existing template files - *WARNING this will delete any existing scripts* -
+initiate_GMH_project(overwrite = TRUE)
+}
 }

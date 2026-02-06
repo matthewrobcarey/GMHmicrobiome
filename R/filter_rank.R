@@ -4,6 +4,7 @@
 #' @param pobject Phyloseq object to filter
 #' @param group Sample data variable to filter by Default NA
 #' @param min.rank cut-off ratio (taxa with mean abundance below this ratio (0.1 = 10 \%) will be group in "Others") Default 10
+#' @param includes Determines how to apply filtering: "any" - taxa ranked in any sample, "all" - taxa ranked in all samples, number - set number of samples. Default = "any"
 #' @return A filtered phyloseq object
 #' @export
 

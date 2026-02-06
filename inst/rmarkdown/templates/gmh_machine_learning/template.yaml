@@ -1,0 +1,4 @@
+name: GMH_machine_learning
+description: >
+   A template for using basic machine learning on your microbiome and metabolomic datasets
+create_dir: FALSE

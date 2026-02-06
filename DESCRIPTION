@@ -13,7 +13,7 @@ Authors@R: c(
 Description: This package contains functions to support analyses of 
     sequencing data, this includes taxa cleaning and filtering, alpha 
     diversity calculation, and multiple rarefaction.
-License: GPL (>= 3) | file LICENSE
+License: GPL (>= 3) 
 Encoding: UTF-8
 LazyData: true
 Depends:
@@ -21,7 +21,6 @@ Depends:
     tidyverse
 biocViews: Microbiome
 Imports:
-    DAtest,
     cowplot (>= 1.0.0),
     decontam,
     markdown,
@@ -29,7 +28,7 @@ Imports:
     ggExtra,
     ggsci,
     kableExtra,
-    pairwiseAdonis
+    pairwiseAdonis,
     pals,
     phangorn,
     picante,
@@ -40,6 +39,6 @@ Imports:
     skimr,
     vegan,
 Remotes:
-    daattali/ggExtra,
-RoxygenNote: 7.3.2
+    daattali/ggExtra
+RoxygenNote: 7.3.3
 BugReports: https://github.com/MSMortensen/GMHmicrobiome/issues

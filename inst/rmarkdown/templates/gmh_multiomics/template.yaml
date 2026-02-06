@@ -1,0 +1,4 @@
+name: GMH_multiomics
+description: >
+    This multiomics scripts is used to compare sequencing and other omic datasets and is a repurposing of the excelent 'MultiomicsAnalysis' by BeckBioHub. See their original here:https://github.com/BeckBioHub/MultiomicsAnalysis
+create_dir: FALSE
