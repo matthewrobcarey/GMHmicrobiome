@@ -1,3 +1,7 @@
+## NOTE:
+
+> ⚠️ **Development Branch**: This branch is under active development and may contain bugs or breaking changes. For stable releases, please use the [main/master branch](https://github.com/MSMortensen/GMHmicrobiome).
+
 GMH microbiome analalysis package
 ================
 
