@@ -24,6 +24,8 @@ Imports:
     cowplot (>= 1.0.0),
     decontam,
     markdown,
+    future,
+    future.apply,
     ggpubr,
     ggExtra,
     ggsci,
