@@ -17,17 +17,17 @@ remove_low_abundance(
 \arguments{
 \item{pobject}{Phyloseq object to remove low abundance taxa}
 
-\item{relative}{remove taxa based on relative abundance (TRUE) or raw reads (FALSE). Default = FALSE remove based on raw reads.}
+\item{relative}{Remove taxa based on relative abundance (TRUE) or raw reads (FALSE). Default = FALSE remove based on raw reads.}
 
-\item{read_count}{value to filter taxa by before removal when using reads. Default = 100}
+\item{read_count}{Value to filter taxa by before removal when using reads. Default = 100}
 
-\item{rel_abun}{value to filter taxa by before removal when using relative abundance. Default = 0.0001 (0.01 percent).}
+\item{rel_abun}{Value to filter taxa by before removal when using relative abundance. Default = 0.0001 (0.01 percent).}
 
-\item{min_prev}{prevalence (the proportion of samples) that must contain the taxa at the minimum level to be kept. Default = 0.01 (1 percent).}
+\item{min_prev}{Prevalence (the proportion of samples) that must contain the taxa at the minimum level to be kept. Default = 0.01 (1 percent).}
 
-\item{rel_fun}{equation used to work out relative abundance, proportion used rather than percent. Default = function(x) x/sum(x).}
+\item{rel_fun}{Equation used to work out relative abundance, proportion used rather than percent. Default = function(x) x/sum(x).}
 
-\item{verbose}{logical, prints number of taxa removed. Default = TRUE}
+\item{verbose}{Logical, prints number of taxa removed. Default = TRUE}
 }
 \value{
 phyloseq object with taxa removed based on rules

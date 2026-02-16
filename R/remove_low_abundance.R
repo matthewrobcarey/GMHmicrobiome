@@ -4,12 +4,12 @@
 #' Wrapper around phyloseq filter_taxa to allow users to remove (prune) low abundance taxa
 #'
 #' @param pobject Phyloseq object to remove low abundance taxa
-#' @param relative remove taxa based on relative abundance (TRUE) or raw reads (FALSE). Default = FALSE remove based on raw reads.
-#' @param read_count value to filter taxa by before removal when using reads. Default = 100
-#' @param rel_abun value to filter taxa by before removal when using relative abundance. Default = 0.0001 (0.01 percent).
-#' @param min_prev prevalence (the proportion of samples) that must contain the taxa at the minimum level to be kept. Default = 0.01 (1 percent).
-#' @param rel_fun equation used to work out relative abundance, proportion used rather than percent. Default = function(x) x/sum(x).
-#' @param verbose logical, prints number of taxa removed. Default = TRUE
+#' @param relative Remove taxa based on relative abundance (TRUE) or raw reads (FALSE). Default = FALSE remove based on raw reads.
+#' @param read_count Value to filter taxa by before removal when using reads. Default = 100
+#' @param rel_abun Value to filter taxa by before removal when using relative abundance. Default = 0.0001 (0.01 percent).
+#' @param min_prev Prevalence (the proportion of samples) that must contain the taxa at the minimum level to be kept. Default = 0.01 (1 percent).
+#' @param rel_fun Equation used to work out relative abundance, proportion used rather than percent. Default = function(x) x/sum(x).
+#' @param verbose Logical, prints number of taxa removed. Default = TRUE
 #'
 #' @return phyloseq object with taxa removed based on rules
 #'

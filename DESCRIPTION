@@ -23,6 +23,7 @@ biocViews: Microbiome
 Imports:
     cowplot (>= 1.0.0),
     decontam,
+    dplyr,
     markdown,
     future,
     future.apply,
@@ -39,6 +40,9 @@ Imports:
     rmdformats,
     shiny,
     skimr,
+    tibble,
+    tidyr,
+    utils,
     vegan,
 Remotes:
     daattali/ggExtra
