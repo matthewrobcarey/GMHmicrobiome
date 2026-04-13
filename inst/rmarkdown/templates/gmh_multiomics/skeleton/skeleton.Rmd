@@ -1,5 +1,688 @@
 ---
-title: "skeleton"
-output: html_document
+title: "PFOS Long read Multiomics analysis"
+author: "MROCA"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    toc_depth: 4
+    collapsed: false
+    code_folding: hide
+    number_sections: false
+knit: (function(inputFile, encoding) { 
+    rmarkdown::render(
+        inputFile, encoding = encoding,
+        output_dir = file.path(dirname(inputFile),"output"),
+        output_file = paste0("<PROJECT>_", Sys.Date(), "_description.html"))
+        })
+params:
+    input: "R_objects/trimmed_phyloseq.RData"
+    metabolomics_labels: "<Path to your metabolomic label file>" 
+    metabolomics_data: "<Path your metabolomics data file here>" # Note not needed if data already merged. 
+    group_var: "PFOS_level"
+    subject_var: "Sample"
+    time_var: NULL
 ---
 
+# This pipeline is adapted from Multiomics: Load, Sanity Checks, Dimensional reduction, and Correlations by Frederik Beck. Please find the original pipeline using the links below:
+https://github.com/BeckBioHub/MultiomicsAnalysis?tab=readme-ov-file and https://rpubs.com/BeckBioHub/1342477
+
+
+
+
+## NB This script is incomplete and will not run ## 
+
+
+
+# Install packages if needed
+```{r}
+# Packages
+install_if_missing <- function(pkgs){
+  miss <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  if(length(miss)) install.packages(miss, dependencies = TRUE)
+}
+pkgs <- c("tidyverse","janitor","matrixStats", "wesanderson")
+install_if_missing(pkgs)
+lapply(pkgs, library, character.only = TRUE)
+
+BiocManager::install("sva")
+
+```
+
+
+
+# Load packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(GMHmicrobiome)
+library(ggpubr)
+library(kableExtra)
+library(phyloseq)
+library(pheatmap)
+library(uwot)   
+library(vegan) 
+library(sva)
+library(tidyverse)
+library(dplyr)
+
+# save parameters
+saveRDS(params, "R_objects/params_description.RDS")
+
+# clear the environment and release memory
+rm(list = ls(all.names = TRUE))
+invisible(gc())
+
+```
+
+
+# Load data and prep
+```{r}
+# Load data
+load(params$input)
+
+# Create separate data sets for analysis 
+otu <- data.frame(otu_table(phy))
+meta <- data.frame(sample_data(phy))
+met_labels <- readxl::read_xlsx(metabolomics_labels, sheet = 'metadata')
+
+## Note you can use the below to read in metabolomics data if not already merged in gmh_metadata_import ##
+# Import metadata with rownames that match phyloseq object 
+# met <- read.csv2(metabolomics_data, sep = ",", header = T, row.names = 1)
+
+
+# Extract metabolites from metadata 
+metabolites_to_keep <- met_labels$Name
+met <- meta %>% select(all_of(metabolites_to_keep))
+
+# Remove metabolites from metadataframe
+meta <- meta %>% select(-metabolites_to_keep)
+
+# Check data all contains the same data
+samples_all <- Reduce(intersect, list(rownames(meta), rownames(otu), rownames(met)))
+stopifnot(length(samples_all) > 0)
+
+# Align row order across dataframes 
+ord <- rownames(meta)
+otu <- otu[ord, , drop = FALSE]
+met <- met[ord, , drop = FALSE]
+
+# Get fearture sets and labels 
+tax_df <- as.data.frame(tax_table(phy))
+taxa <- tax_df$Species
+metabolites <- met_labels$Name
+
+## Microbiome preperation ##
+otu_mat <- as.matrix(otu)
+row_sums <- rowSums(otu_mat)
+if (any(row_sums == 0)){
+  warning('Some samples have zero total counts; adding a small psuedocount.')
+  otu_mat[row_sums ==0,] <- otu_mat[row_sums == 0,] + 1L
+  row_sums <- rowSums(otu_mat)
+}
+
+otu_prop <- sweep(otu_mat, 1, row_sums, "/")
+
+
+# CLR transformation with small psuedocount (better for compositional analysis) 
+pseudocount <- 0.5
+logp <- log(otu_prop + pseudocount / row_sums)
+clr_center <- rowMeans(logp)
+otu_clr <- sweep(logp, 1, clr_center, "-")
+
+## Metabolite preperation ##
+# Keep only the metabolite column
+
+met_mat <- met %>% select(any_of(metabolites)) %>% as.matrix()
+
+# Log transform data 
+met_log <- log1p(met_mat)
+met_scaled <- scale(met_log)
+
+scfa_df <- met_labels %>% filter(set == 'SCFA')
+scfa_names <- scfa_df$Name
+ba_df <- met_labels %>% filter(set == 'BA')
+ba_names <- ba_df$Name
+
+
+# SCFA composite: (Acetate + Propionate + Butyrate) - (Isobutyrate + Isovalerate) - change names as needed
+scfa_cols <- intersect(colnames(met_mat), c("Acetic_acid","Propanoic_acid","Butanoic_acid","n2_methyl_propanoic_acid","n3_methylbutanoic_acid"))
+stopifnot(all(c("Acetic_acid","Propanoic_acid","Butanoic_acid","n2_methyl_propanoic_acid","n3_methylbutanoic_acid") %in% scfa_cols))
+scfa_score <- with(as.data.frame(met_mat),
+  Acetic_acid + Propanoic_acid + 1.3*Butanoic_acid - (n2_methyl_propanoic_acid + n3_methylbutanoic_acid)
+)
+scfa_score_z <- as.numeric(scale(scfa_score))
+
+met_bc <- met_scaled
+
+
+```
+
+
+# Create master objects and long forms for plotting 
+```{r}
+
+# Master objects 
+X_micro_clr <- otu_clr
+X_metab_bc <- met_bc
+
+meta$barcode <- rownames(meta)
+tax_df$otu <- rownames(tax_df)
+
+
+# Long form for plotting
+
+micro_long <- as_tibble(X_micro_clr, rownames = "sample_id")%>% 
+  pivot_longer(-sample_id, names_to = "feature", values_to = "clr_abundance") %>%
+  left_join(meta, by = c('sample_id' = 'barcode')) %>%
+  left_join(tax_df %>% select("otu","Species"), by = c("feature" = "otu"))
+  
+metab_long <- as_tibble(X_metab_bc, rownames = "sample_id") %>%
+  pivot_longer(-sample_id, names_to = "metabolite", values_to = "scaled_values") %>%
+  left_join(meta, by = c("sample_id" = "barcode")) %>%
+  left_join(met_labels %>% select("Name", "set"), by = c("metabolite" = "Name"))
+
+# Add scores to metadata 
+
+meta_enhanced <- meta %>% mutate(scfa_scores = scfa_score_z) 
+
+
+# Quick sanity checks 
+message("Samples per group:")
+print(table(meta_enhanced$PFOS_level))
+
+message("SCFA score by group (mean ±sd):")
+print(meta_enhanced %>% group_by(PFOS_level) %>% 
+        summarise(mean = mean(scfa_scores), sd = sd(scfa_scores), .groups = "drop"))
+
+# Save as R_object 
+save(meta, meta_enhanced, met_labels, X_micro_clr, X_metab_bc, micro_long, metab_long, file = "R_objects/prepared_objects.RData")
+
+# Slim csv based on SFA scores 
+
+meta_enhanced %>% select(SampleID, barcode, alder, sex_calc, PFOS_stool, PFOS_level, scfa_scores) %>% write.csv(file = "output/sample_level_scores.csv", row.names = FALSE)
+
+# clear the environment and release memory
+rm(list = ls(all.names = TRUE))
+invisible(gc())
+
+
+```
+
+
+# Read in cleaned data and carry out sanity check 
+```{r}
+load("R_objects/prepared_objects.RData")
+
+# Boxplots SCFA score by group
+
+meta_enhanced$PFOS_level <- factor(meta_enhanced$PFOS_level, levels = c("Low", "Mid", "High"), ordered = TRUE)
+
+SCFA <- ggplot(meta_enhanced, aes(x = PFOS_level, y = scfa_scores, fill = PFOS_level)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, size = 1, alpha = 0.8) +
+  labs( y = 'Composite SCFA score (z)', x = "PFOS level") +
+  theme_minimal( base_size = 14) +
+  theme(legend.position = "none")+
+  scale_fill_earth15()
+
+SCFA
+
+SCFA_PFOS <- ggplot(meta_enhanced, aes( x= scfa_scores, y = PFOS_stool, colour = PFOS_level)) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs( x= "SCFA score (z)", y = "Faecal PFOS concentration (ng/g)") +
+  theme_minimal(base_size = 14) +
+  scale_color_earth15()
+
+SCFA_PFOS
+
+
+SCFA_PFOS_serum <- ggplot(meta_enhanced, aes( x= scfa_scores, y = PFOS_1, colour = PFOS_level)) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs( x= "SCFA score (z)", y = "Faecal PFOS concentration (ng/g)") +
+  theme_minimal(base_size = 14) +
+  scale_color_earth15()
+
+SCFA_PFOS_serum
+
+```
+
+
+# Dimension reduction and multivariate analysis for each omics 
+
+## Plotting function for data -  Update group variable as needed.
+```{r}
+plot_xy <- function(df, x, y){
+  ggplot(df, aes(.data[[x]], .data[[y]], colour = group, fill = group)) +
+  stat_ellipse(aes(fill = group),
+               geom = "polygon", type = "norm", level = 0.68,
+               alpha = 0.3, color = "black", linewidth = 0.6)+
+    geom_point(size = 2.6, alpha = 0.95) +
+    scale_color_earth15(name = "group")+
+    scale_fill_earth15(name = "group") +
+    labs(x =x, y=y) +
+    theme_minimal()
+  
+}
+
+```
+
+## Microbiome analysis 
+```{r}
+
+# PCoA on Aitchinson distance (Euclidean on CLR)
+d_ait <- dist(X_micro_clr, method = "euclidean")
+fit_pcoa <- cmdscale(d_ait, k = 3, eig = TRUE)
+df_pcoa_micro <- tibble(PCo1 = fit_pcoa$points[,1],
+                        PCo2 = fit_pcoa$points[,2],
+                        PCo3 = fit_pcoa$points[,3],
+                        sample_id = meta_enhanced$SampleID,
+                        group = meta_enhanced$PFOS_level)
+# Percent variance (positive eigenvalues only)
+evals <- fit_pcoa$eig; pve <- evals[evals>0]/sum(evals[evals>0])
+p2 <- plot_xy(df_pcoa_micro, "PCo1", "PCo2")
+p2
+#ggsave("plots/high_res/pcoa_microbiome_aitchison.png", p2, width = 6.5, height = 5, dpi = 900)
+#write.csv(df_pcoa_micro, "output/pcoa_microbiome_coords.csv", row.names = FALSE)
+
+
+# UMAP (on CLR)
+set.seed(123)
+U_micro <- umap(X_micro_clr, n_neighbors = 15, min_dist = 0.15, metric = "euclidean")
+df_umap_micro <- tibble(UMAP1 = U_micro[,1], UMAP2 = U_micro[,2],
+                        sample_id = meta$SampleID, group = meta_enhanced$PFOS_level)
+p3 <- plot_xy(df_umap_micro, "UMAP1", "UMAP2")
+ggsave("plots/high_res/umap_microbiome.png", p3, width = 6.5, height = 5, dpi = 300)
+write.csv(df_umap_micro, "output/umap_microbiome_coords.csv", row.names = FALSE)
+p3
+
+
+```
+
+## Metabolomics analysis 
+```{r}
+# PCA
+pc_met <- prcomp(X_metab_bc, center = TRUE, scale. = FALSE)
+var_met <- (pc_met$sdev^2)/sum(pc_met$sdev^2)
+df_pc_met <- as_tibble(pc_met$x[,1:3]) %>%
+  mutate(sample_id = meta_enhanced$SampleID, group = meta_enhanced$PFOS_level)
+p4 <- plot_xy(df_pc_met, "PC1", "PC2")
+p4
+#ggsave("plots/high_res/pca_metabolomics.png", p4, width = 6.5, height = 5, dpi = 900)
+#write.csv(cbind(sample_id = meta$SampleID, df_pc_met), "output/pca_metabolomics_scores.csv", row.names = FALSE)
+
+# UMAP
+set.seed(123)
+U_met <- umap(X_metab_bc, n_neighbors = 15, min_dist = 0.15, metric = "euclidean")
+df_umap_met <- tibble(UMAP1 = U_met[,1], UMAP2 = U_met[,2],
+                      sample_id = meta_enhanced$SampleID, group = meta_enhanced$PFOS_level)
+p5 <- plot_xy(df_umap_met, "UMAP1", "UMAP2")
+p5
+#ggsave("plots/high_res/umap_metabolomics.png", p5, width = 6.5, height = 5, dpi = 900)
+#write.csv(df_umap_met, "output/umap_metabolomics_coords.csv", row.names = FALSE)
+
+
+
+
+```
+
+
+#  Cross correlation
+```{r}
+# Microbiome vs metabolites
+cor_micro_met <- cor(X_micro_clr, X_metab_bc, method = "spearman")
+
+A <- pheatmap(cor_micro_met,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+A
+
+#ggsave("plots/high_res/metab_micro_correlation.png", A, width = 15, height = 25, dpi = 1200)
+
+
+# Update plot to include species names 
+corr_df <- as.data.frame(cor_micro_met)
+corr_df$OTU <- rownames(corr_df)
+tmp <- micro_long[c("feature", "Species")] %>% distinct(feature, .keep_all = TRUE)
+corr_df <-merge(corr_df, tmp, by.x = "OTU", by.y = "feature", all.x = TRUE, all.y = FALSE)
+rownames(corr_df) <- corr_df$Species
+drops <- c("OTU", "Species")
+corr_df <- corr_df[, !names(corr_df) %in% drops]
+
+cor_micro_met_spp <- as.matrix(corr_df)
+
+
+B <- pheatmap(cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+B
+
+#ggsave("plots/high_res/metab_micro_SPP_correlation.png", B, width = 15, height = 25, dpi = 1200)
+
+
+# Save as R_object This will flag error as high_corr is from test_plots script. 
+#save(meta, meta_enhanced, met_labels, X_micro_clr, X_metab_bc, micro_long, metab_long, high_corr, cor_micro_met_spp, cor_micro_met, file = "R_objects/prepared_objects02.RData")
+
+
+# clear the environment and release memory
+rm(list = ls(all.names = TRUE))
+invisible(gc())
+
+
+
+```
+
+
+## Subset data and re-plot 
+```{r}
+# Load datasets - be mindful of warning above with saving of prepared_objects02
+load("R_objects/prepared_objects02.RData")
+
+# First lets subset the SCFA and BAs out and them compare them to all species
+scfa_df <- met_labels %>% filter(set == 'SCFA')
+scfa_names <- scfa_df$Name
+ba_df <- met_labels %>% filter(set == 'BA')
+ba_names <- ba_df$Name
+
+# Create df of total correlation matrix 
+corr_df <- as.data.frame(cor_micro_met_spp)
+
+# Create BA correlation matrix 
+ba_cor_micro_met_spp_df <- corr_df %>% select(all_of(ba_names))
+ba_cor_micro_met_spp <- as.matrix(ba_cor_micro_met_spp_df)
+
+# Generate correlation matrix with BA only 
+C <- pheatmap(ba_cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+C
+
+#ggsave("plots/high_res/metab_micro_BileAcid_correlation.png", C, width = 15, height = 25, dpi = 1200)
+
+
+# Create SCFA correlation matrix 
+scfa_cor_micro_met_spp_df <- corr_df %>% select(all_of(scfa_names))
+scfa_cor_micro_met_spp <- as.matrix(scfa_cor_micro_met_spp_df)
+
+# Generate correlation matrix with SCFA only 
+D <- pheatmap(scfa_cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+D
+
+#ggsave("plots/high_res/metab_micro_SCFA_correlation.png", D, width = 15, height = 25, dpi = 1200)
+
+
+# Get the species list from high_corr and combine with SCFA/BA
+spp_subset <- high_corr$Species 
+
+# Filter the BA dataframe and create a new matrix 
+
+ba_cor_2 <- ba_cor_micro_met_spp_df %>% filter(rownames(.) %in% spp_subset)
+ba_cor_2_matx <- as.matrix(ba_cor_2)
+
+# Generate correlation matrix with BA and subset species only 
+E <- pheatmap(ba_cor_2_matx,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+#ggsave("plots/high_res/metab_spp_BA_correlation.png", E, width = 7, height = 5, dpi = 1200)
+
+# Filter SCFA dataframe and create new subset 
+
+# Filter the BA dataframe and create a new matrix 
+
+scfa_cor_2 <- scfa_cor_micro_met_spp_df %>% filter(rownames(.) %in% spp_subset)
+scfa_cor_2_matx <- as.matrix(scfa_cor_2)
+
+# Generate correlation matrix with BA and subset species only 
+G <- pheatmap(scfa_cor_2_matx,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+#ggsave("plots/high_res/metab_spp_SCFA_correlation.png", G, width = 7, height = 5, dpi = 1200)
+
+
+```
+
+
+## Statistical correaltion 
+```{r}
+
+results <- data.frame(OTU = unique(micro_long$feature))
+
+species_list <- unique(micro_long$feature)
+
+df <- as.data.frame(X_micro_clr)
+
+results$rho <- sapply(species_list, function(sp) {
+  cor(df[[sp]], meta_enhanced$PFOS_stool, method = "spearman", use = "pairwise.complete.obs")
+})
+
+results$p.value <- sapply(species_list, function(sp) {
+  cor.test(df[[sp]], meta_enhanced$PFOS_stool, method = "spearman")$p.value
+})
+
+# Adjust for FDR
+results$FDR <- p.adjust(results$p.value, method = "fdr")
+
+# Order by FDR (optional)
+results <- results[order(results$FDR), ]
+
+results
+
+sig_before <- subset(results, p.value < 0.05)
+sig_after <- subset(results, FDR < 0.05)
+nrow(sig_before)
+nrow(sig_after)
+
+
+high_corr <-subset(results,
+                       p.value < 0.05 &
+                       (rho < -0.35 | rho > 0.35))
+```
+
+
+## Redo corr plots with selected metabolites 
+```{r}
+# Microbiome vs metabolites
+
+# Filter for strong correlated species
+spp_to_keep <- high_corr$OTU
+
+micro_filter <- df %>% select(all_of(spp_to_keep))
+
+micro_filt <- as.matrix(micro_filter)
+
+
+cor_micro_met <- cor(micro_filt, X_metab_bc, method = "spearman")
+
+A <- pheatmap(cor_micro_met,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+A
+
+#ggsave("plots/high_res/subset1_metab_micro_correlation.png", A, width = 15, height = 25, dpi = 1200)
+
+
+# Update plot to include species names 
+corr_df <- as.data.frame(cor_micro_met)
+corr_df$OTU <- rownames(corr_df)
+tmp <- micro_long[c("feature", "Species")] %>% distinct(feature, .keep_all = TRUE)
+corr_df <-merge(corr_df, tmp, by.x = "OTU", by.y = "feature", all.x = TRUE, all.y = FALSE)
+rownames(corr_df) <- corr_df$Species
+drops <- c("OTU", "Species")
+corr_df <- corr_df[, !names(corr_df) %in% drops]
+
+cor_micro_met_spp <- as.matrix(corr_df)
+
+
+B <- pheatmap(cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+B
+
+
+# First lets subset the SCFA and BAs out and them compare them to all species
+scfa_df <- met_labels %>% filter(set == 'SCFA')
+scfa_names <- scfa_df$Name
+ba_df <- met_labels %>% filter(set == 'BA')
+ba_names <- ba_df$Name
+
+# Create df of total correlation matrix 
+corr_df <- as.data.frame(cor_micro_met_spp)
+
+# Create BA correlation matrix 
+ba_cor_micro_met_spp_df <- corr_df %>% select(all_of(ba_names))
+ba_cor_micro_met_spp <- as.matrix(ba_cor_micro_met_spp_df)
+
+# Generate correlation matrix with BA only 
+C <- pheatmap(ba_cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+C
+
+#ggsave("plots/high_res/metab_micro_BileAcid_correlation.png", C, width = 15, height = 25, dpi = 1200)
+
+
+# Create SCFA correlation matrix 
+scfa_cor_micro_met_spp_df <- corr_df %>% select(all_of(scfa_names))
+scfa_cor_micro_met_spp <- as.matrix(scfa_cor_micro_met_spp_df)
+
+# Generate correlation matrix with SCFA only 
+D <- pheatmap(scfa_cor_micro_met_spp,
+         color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+         main = "Microbiome (CLR taxa) vs Metabolites",
+         fontsize_row = 6, fontsize_col = 8,
+         clustering_method = "complete")
+
+D
+
+#ggsave("plots/high_res/subset1_metab_micro_SCFA_correlation.png", D, width = 15, height = 10, dpi = 1200)
+```
+
+
+## Correlation plot with added stats
+```{r}
+# Check inputs
+A <- micro_filt       # samples x taxa
+B <- X_metab_bc       # samples x metabolites
+
+
+
+# Optional: drop non-numeric columns safely
+A <- A[, vapply(as.data.frame(A), is.numeric, logical(1)), drop = FALSE]
+B <- B[, vapply(as.data.frame(B), is.numeric, logical(1)), drop = FALSE]
+
+# Optional: remove underscores and replace with spaces from feature labels 
+tmp <- as.data.frame(B)
+colnames(tmp) <- gsub("_", " ", colnames(tmp))
+B <- as.matrix(tmp)
+
+
+#Compute Spearmans correlations (pairwise complete) 
+cor_micro_met <- suppressWarnings(cor(A, B, method = "spearman", use = "pairwise.complete.obs"))
+
+# Update plot to include species names 
+corr_df <- as.data.frame(cor_micro_met)
+corr_df$OTU <- rownames(corr_df)
+tmp <- micro_long[c("feature", "Species")] %>% distinct(feature, .keep_all = TRUE)
+corr_df <-merge(corr_df, tmp, by.x = "OTU", by.y = "feature", all.x = TRUE, all.y = FALSE)
+rownames(corr_df) <- corr_df$Species
+drops <- c("OTU", "Species")
+corr_df <- corr_df[, !names(corr_df) %in% drops]
+rownames(corr_df) <- trimws(rownames(corr_df))
+
+# Change the names of specific features 
+rownames(corr_df)[rownames(corr_df) == "Blautia_A wexlerae"] <- "Blautia luti"
+
+
+cor_micro_met<- as.matrix(corr_df)
+
+# Compute Spearmans p-values per cell 
+spearman_p_matrix <- function(A, B) {
+  nA <- ncol(A); nB <- ncol(B)
+  p_mat <- matrix(NA_real_, nrow = nA, ncol = nB,
+                  dimnames = list(colnames(A), colnames(B)))
+  # Loop over columns (features) – clear & robust
+  for (i in seq_len(nA)) {
+    x <- A[, i]
+    for (j in seq_len(nB)) {
+      y <- B[, j]
+      ok <- is.finite(x) & is.finite(y)
+      if (sum(ok) >= 3) {
+        # exact=FALSE avoids very slow exact computation for larger n
+        s <- try(suppressWarnings(cor.test(x[ok], y[ok], method = "spearman", exact = FALSE)),
+                 silent = TRUE)
+        p_mat[i, j] <- if (inherits(s, "try-error")) NA_real_ else s$p.value
+      } else {
+        p_mat[i, j] <- NA_real_
+      }
+    }
+  }
+  p_mat
+}
+
+p_mat <- spearman_p_matrix(A, B)
+
+# FDR correction across all cells tested 
+q_vec <- p.adjust(as.vector(p_mat), method = "fdr")
+q_mat <- matrix(q_vec, nrow = nrow(p_mat), ncol = ncol(p_mat),
+                dimnames = dimnames(p_mat))
+
+# Convert FDR to significance stars 
+fdr_to_stars <- function(q) {
+  ifelse(!is.finite(q), "",
+  ifelse(q < 0.001, "***",
+  ifelse(q < 0.01,  "**",
+  ifelse(q < 0.05,  "*", ""))))
+}
+star_mat <- matrix(fdr_to_stars(as.vector(q_mat)),
+                   nrow = nrow(q_mat), ncol = ncol(q_mat),
+                   dimnames = dimnames(q_mat))
+
+# Optionally show stars only where q < 0.05:
+star_mat_sig <- ifelse(q_mat < 0.05, star_mat, "")
+
+# Plot heatmap with stars overlaid
+A_plot <- pheatmap(
+  cor_micro_met,
+  color = colorRampPalette(c("#3885B6","white","#FA7F2E"))(50),
+  #main = "Microbiome (CLR taxa) vs Metabolites",
+  fontsize_row = 6, fontsize_col = 8,
+  clustering_method = "complete",
+  display_numbers = star_mat_sig,   # <- significance overlay
+  number_color = "black",
+   fontsize_number = 8,
+  border_color = NA
+)
+
+ggsave("plots/high_res/subset1_SIGNIF_metab_micro_correlation.png", A_plot, width = 25, height = 12, dpi = 1200)
+
+```
